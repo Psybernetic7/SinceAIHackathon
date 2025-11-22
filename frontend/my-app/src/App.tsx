@@ -38,6 +38,7 @@ function App() {
   const [maxAmount, setMaxAmount] = useState<number | "">("");
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [useLLM, setUseLLM] = useState(true);
 
   const parsedNeeds = useMemo(
     () =>
@@ -87,7 +88,7 @@ function App() {
         funding_amount_min: minAmount === "" ? null : minAmount,
         funding_amount_max: maxAmount === "" ? null : maxAmount,
       };
-      const resp = await fetch(`${API_BASE}/recommendations/by-business-id`, {
+      const resp = await fetch(`${API_BASE}/recommendations/by-business-id?use_llm=${useLLM}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -222,6 +223,14 @@ function App() {
                 />
               </label>
             </div>
+            <label className="field toggle">
+              <span>Use LLM explanations</span>
+              <input
+                type="checkbox"
+                checked={useLLM}
+                onChange={(e) => setUseLLM(e.target.checked)}
+              />
+            </label>
             <button
               disabled={!selectedId || loadingRecos}
               onClick={fetchRecommendations}

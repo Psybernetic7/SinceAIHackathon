@@ -198,6 +198,11 @@ a {
   gap: 12px;
 }
 
+.toggle {
+  align-items: center;
+  grid-template-columns: 1fr auto;
+}
+
 .recos {
   display: grid;
   gap: 12px;
