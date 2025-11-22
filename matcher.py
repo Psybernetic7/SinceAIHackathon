@@ -1,10 +1,15 @@
 import argparse
 import json
+from datetime import datetime
 from typing import List, Tuple
 
 import requests
-from models import CompanyProfile, FundingInstrument
+from models import CompanyProfile, FundingInstrument, Stage
 from ytj_client import build_company_from_ytj, YTJError
+from explanations import make_explanation
+
+STAGES: List[Stage] = ["pre-seed", "seed", "growth", "scale-up"]
+FUNDING_NEED_TYPES = {"RDI", "internationalization", "investments", "working capital"}
 
 
 def load_instruments(path: str) -> List[FundingInstrument]:
@@ -18,6 +23,19 @@ def load_instruments(path: str) -> List[FundingInstrument]:
         with open(path, "r", encoding="utf-8") as f:
             raw = json.load(f)
     return [FundingInstrument(**item) for item in raw]
+
+
+def validate_stage(stage: str) -> Stage:
+    if stage not in STAGES:
+        raise ValueError(f"Stage '{stage}' is not one of {STAGES}")
+    return stage  # type: ignore[return-value]
+
+
+def validate_need_types(needs: List[str]) -> List[str]:
+    invalid = [n for n in needs if n.lower() not in {t.lower() for t in FUNDING_NEED_TYPES}]
+    if invalid:
+        raise ValueError(f"Unknown funding_need_types: {invalid}. Allowed: {sorted(FUNDING_NEED_TYPES)}")
+    return needs
 
 
 def score_instrument(
@@ -47,16 +65,22 @@ def score_instrument(
         # very naive for non-Finnish companies
         reasons.append("Company is not in Finland; geographic fit not deeply evaluated.")
 
-    # -------- 1) Stage fit (more decisive) --------
+    # -------- 1) Stage fit (more decisive, adjacency aware) --------
+    stage_order = {s: i for i, s in enumerate(STAGES)}
     if company.stage in instrument.target_stages:
         score += 4
         reasons.append(f"Company stage '{company.stage}' is in target stages {instrument.target_stages}.")
     else:
-        # small nuance: if company is 'seed' and target includes 'pre-seed' or 'growth', maybe not terrible
-        score -= 4
-        reasons.append(
-            f"Company stage '{company.stage}' is not in target stages {instrument.target_stages}."
-        )
+        comp_idx = stage_order.get(company.stage)
+        inst_idxs = [stage_order.get(s) for s in instrument.target_stages if stage_order.get(s) is not None]
+        if comp_idx is not None and any(abs(comp_idx - idx) == 1 for idx in inst_idxs):
+            score += 1
+            reasons.append(f"Company stage '{company.stage}' is adjacent to target stages {instrument.target_stages}.")
+        else:
+            score -= 4
+            reasons.append(
+                f"Company stage '{company.stage}' is not aligned with target stages {instrument.target_stages}."
+            )
 
     # -------- 2) Funding need type overlap (strong signal) --------
     overlap = set(n.lower() for n in company.funding_need_types) & \
@@ -121,6 +145,22 @@ def score_instrument(
                 f"Company industry '{company.industry}' does not clearly match instrument focus {instrument.target_industries}."
             )
 
+    # -------- 5) Application window urgency (if applicable) --------
+    if instrument.application_type == "call-based" and instrument.application_window:
+        try:
+            # Expected format: "YYYY-MM-DD – YYYY-MM-DD"
+            start_str, end_str = [p.strip() for p in instrument.application_window.split("–")]
+            end_date = datetime.strptime(end_str, "%Y-%m-%d").date()
+            days_left = (end_date - datetime.utcnow().date()).days
+            if 0 <= days_left <= 30:
+                score += 2
+                reasons.append(f"Call deadline approaching in {days_left} days.")
+            elif days_left < 0:
+                score -= 1
+                reasons.append("Call deadline appears to have passed.")
+        except Exception:
+            reasons.append("Could not parse application window for urgency scoring.")
+
     return score, reasons
 
 
@@ -167,15 +207,21 @@ def main():
     instruments = load_instruments(args.instruments)
     needs = [n.strip() for n in args.needs.split(",") if n.strip()]
 
+    try:
+        stage_validated = validate_stage(args.stage)
+        needs_validated = validate_need_types(needs)
+    except ValueError as exc:
+        raise SystemExit(str(exc))
+
     company: CompanyProfile
     if args.business_id:
         try:
             company = build_company_from_ytj(
                 args.business_id,
-                stage=args.stage,  # type: ignore[arg-type]
+                stage=stage_validated,
                 revenue_class=args.revenue_class,
                 employees=args.employees,
-                funding_need_types=needs,
+                funding_need_types=needs_validated,
                 funding_amount_min=args.min_amount,
                 funding_amount_max=args.max_amount,
             )
@@ -193,8 +239,8 @@ def main():
             industry="software, AI",
             revenue_class=args.revenue_class,
             employees=args.employees,
-            stage=args.stage,  # type: ignore[arg-type]
-            funding_need_types=needs,
+            stage=stage_validated,
+            funding_need_types=needs_validated,
             funding_amount_min=args.min_amount,
             funding_amount_max=args.max_amount,
             country=args.country,

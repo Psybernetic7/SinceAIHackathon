@@ -1,11 +1,12 @@
 # main.py
+import os
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from models import CompanyProfile, FundingInstrument, Stage
-from matcher import load_instruments, rank_instruments
+from matcher import load_instruments, rank_instruments, validate_stage, validate_need_types
 from ytj_client import build_company_from_ytj, YTJError
 from explanations import make_explanation
 
@@ -14,7 +15,8 @@ app = FastAPI(title="Smart Funding Advisor MVP")
 
 # ---------- Load instruments once at startup ----------
 
-INSTRUMENTS: List[FundingInstrument] = load_instruments("funding_instruments.json")
+INSTRUMENT_SOURCE = os.getenv("INSTRUMENTS_SOURCE", "funding_instruments.json")
+INSTRUMENTS: List[FundingInstrument] = load_instruments(INSTRUMENT_SOURCE)
 
 
 # ---------- Pydantic models for API ----------
@@ -56,6 +58,15 @@ def root():
     return {"message": "Smart Funding Advisor API. See /docs for Swagger UI."}
 
 
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "instrument_source": INSTRUMENT_SOURCE,
+        "instrument_count": len(INSTRUMENTS),
+    }
+
+
 # ---------- Main recommendations endpoint (manual company input) ----------
 
 @app.post("/recommendations", response_model=List[Recommendation])
@@ -63,6 +74,11 @@ def get_recommendations(company: CompanyInput):
     """
     Take a company profile as JSON, return ranked funding instruments + reasons.
     """
+    try:
+        validate_stage(company.stage)
+        validate_need_types(company.funding_need_types)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     # Convert request model -> internal dataclass
     company_profile = CompanyProfile(
@@ -125,6 +141,12 @@ def get_recommendations_by_business_id(payload: CompanyByBusinessIdInput):
     Use YTJ (PRH open data) to fetch company info from Business ID,
     then run the matching logic.
     """
+    try:
+        validate_stage(payload.stage)
+        validate_need_types(payload.funding_need_types)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     try:
         company = build_company_from_ytj(
             payload.business_id,
