@@ -3,6 +3,7 @@ import os
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from models import CompanyProfile, FundingInstrument, Stage
@@ -12,6 +13,22 @@ from explanations import make_explanation
 
 
 app = FastAPI(title="Smart Funding Advisor MVP")
+
+# ---------- CORS for frontend ----------
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost",
+    "http://127.0.0.1",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ---------- Load instruments once at startup ----------
 
