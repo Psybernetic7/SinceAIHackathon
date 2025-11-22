@@ -1,19 +1,19 @@
 from dataclasses import dataclass
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, TypeAlias
 
-Stage = Literal["pre-seed", "seed", "growth", "scale-up"]
+Stage: TypeAlias = Literal["pre-seed", "seed", "growth", "scale-up"]
 
 @dataclass
 class CompanyProfile:
     name: str
-    business_id: Optional[str]  # Y-tunnus, can be None
-    industry: str               # free text or NACE code
-    revenue_class: str          # e.g. "<250k", "250k-1M", "1-5M", ">5M"
+    business_id: Optional[str]
+    industry: str
+    revenue_class: str
     employees: int
-    stage: Stage                # "pre-seed" | "seed" | "growth" | "scale-up"
-    funding_need_types: List[str]   # ["RDI", "internationalization", "investments"]
-    funding_amount_min: Optional[int]  # in euros
-    funding_amount_max: Optional[int]  # in euros
+    stage: Stage
+    funding_need_types: List[str]
+    funding_amount_min: Optional[int]
+    funding_amount_max: Optional[int]
     country: str = "Finland"
 
 @dataclass
