@@ -27,7 +27,7 @@ FastAPI + React prototype that ranks public funding instruments for Finnish comp
 ## Frontend setup (React/Vite)
 1. `cd frontend/my-app`
 2. Install deps: `npm install`
-3. `.env` with `VITE_API_BASE=http://localhost:8000` if the API is not on the default.
+3. `.env.local` with `VITE_API_BASE=http://localhost:8000` if the API is not on the default.
 4. Start dev server: `npm run dev` (Vite defaults to port 5173).
 
 ## API reference (high level)
