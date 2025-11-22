@@ -10,6 +10,12 @@ from models import CompanyProfile, FundingInstrument, Stage
 from matcher import load_instruments, rank_instruments, validate_stage, validate_need_types
 from ytj_client import build_company_from_ytj, YTJError
 from explanations import make_explanation
+from llm import (
+    generate_explanations,
+    summarize_company,
+    is_configured as llm_configured,
+    LLMNotConfigured,
+)
 
 
 app = FastAPI(title="Smart Funding Advisor MVP")
@@ -66,6 +72,7 @@ class Recommendation(BaseModel):
     score: int
     reasons: List[str]
     explanation: str
+    llm_explanation: Optional[str] = None
 
 
 # ---------- Simple root endpoint (optional) ----------
@@ -87,7 +94,7 @@ def health():
 # ---------- Main recommendations endpoint (manual company input) ----------
 
 @app.post("/recommendations", response_model=List[Recommendation])
-def get_recommendations(company: CompanyInput):
+def get_recommendations(company: CompanyInput, use_llm: bool = False):
     """
     Take a company profile as JSON, return ranked funding instruments + reasons.
     """
@@ -114,9 +121,20 @@ def get_recommendations(company: CompanyInput):
     # Use your matcher
     scored = rank_instruments(company_profile, INSTRUMENTS)
 
+    llm_explanations: List[Optional[str]] = []
+    if use_llm:
+        if not llm_configured():
+            raise HTTPException(status_code=503, detail="LLM not configured (missing OPENAI_API_KEY).")
+        try:
+            llm_explanations = generate_explanations(company_profile, scored)
+        except LLMNotConfigured:
+            raise HTTPException(status_code=503, detail="LLM not configured (missing OPENAI_API_KEY).")
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"LLM generation failed: {exc}")
+
     # Convert dataclass instruments to plain dicts
     recommendations: List[Recommendation] = []
-    for item in scored:
+    for idx, item in enumerate(scored):
         inst: FundingInstrument = item["instrument"]
 
         # build explanation per item
@@ -144,6 +162,7 @@ def get_recommendations(company: CompanyInput):
                 score=item["score"],
                 reasons=item["reasons"],
                 explanation=explanation,
+                llm_explanation=llm_explanations[idx] if use_llm and llm_explanations else None,
             )
         )
 
@@ -153,7 +172,7 @@ def get_recommendations(company: CompanyInput):
 # ---------- YTJ-based endpoint (Business ID) ----------
 
 @app.post("/recommendations/by-business-id", response_model=List[Recommendation])
-def get_recommendations_by_business_id(payload: CompanyByBusinessIdInput):
+def get_recommendations_by_business_id(payload: CompanyByBusinessIdInput, use_llm: bool = False):
     """
     Use YTJ (PRH open data) to fetch company info from Business ID,
     then run the matching logic.
@@ -187,8 +206,19 @@ def get_recommendations_by_business_id(payload: CompanyByBusinessIdInput):
 
     scored = rank_instruments(company, INSTRUMENTS)
 
+    llm_explanations: List[Optional[str]] = []
+    if use_llm:
+        if not llm_configured():
+            raise HTTPException(status_code=503, detail="LLM not configured (missing OPENAI_API_KEY).")
+        try:
+            llm_explanations = generate_explanations(company, scored)
+        except LLMNotConfigured:
+            raise HTTPException(status_code=503, detail="LLM not configured (missing OPENAI_API_KEY).")
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"LLM generation failed: {exc}")
+
     recommendations: List[Recommendation] = []
-    for item in scored:
+    for idx, item in enumerate(scored):
         inst: FundingInstrument = item["instrument"]
 
         # explanation here uses the company built from YTJ
@@ -216,6 +246,7 @@ def get_recommendations_by_business_id(payload: CompanyByBusinessIdInput):
                 score=item["score"],
                 reasons=item["reasons"],
                 explanation=explanation,
+                llm_explanation=llm_explanations[idx] if use_llm and llm_explanations else None,
             )
         )
 
